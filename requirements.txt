@@ -1,0 +1,17 @@
+# === 本地模型与 API ===
+ollama>=0.3.0              # Ollama 本地模型调用（对话/补全）
+requests>=2.31.0           # 通用 HTTP API（OpenAI 兼容、自建接口等）
+httpx>=0.27.0              # 异步/同步 HTTP，适合流式、WebSocket
+
+# === TTS（Sprint 2）===
+edge-tts>=6.1.0            # 微软 Edge TTS，免本地大模型
+
+# === 配置与环境 ===
+python-dotenv>=1.0.0       # .env 管理 API Key，避免写死
+
+# === 打包与 UI（Sprint 3 按需安装）===
+# pyinstaller>=6.0.0       # 打包 .exe
+# PyQt5>=5.15               # 置顶 Overlay 窗口（可选）
+
+# === 可选：自托管 GGUF（若不用 Ollama）===
+# llama-cpp-python>=0.2.0   # 需按文档选 GPU/CPU 版本，体积大
