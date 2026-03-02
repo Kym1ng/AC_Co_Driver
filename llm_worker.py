@@ -2,7 +2,7 @@
 LLM Worker — Sprint 2.
 
 Loads a GGUF model once at startup, then runs a background thread that
-drains an event queue and generates short 傲娇-style commentary.
+drains an event queue and generates short tsundere-style / snarky commentary.
 
 Usage (standalone test):
     python llm_worker.py
@@ -29,7 +29,7 @@ from pathlib import Path
 from llama_cpp import Llama
 
 # ── Model config ──────────────────────────────────────────────────────
-DEFAULT_MODEL_PATH = "models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"
+DEFAULT_MODEL_PATH = "models/qwen2.5-1.5b-instruct-q4_k_m.gguf"
 N_CTX      = 512    # context window (small = fast)
 N_GPU_LAYERS = -1   # -1 = offload all layers to GPU/Metal; 0 = CPU only
 MAX_TOKENS = 40     # hard cap on output length
@@ -37,18 +37,18 @@ TEMPERATURE = 0.85  # a little creative but not unhinged
 
 # ── System persona ────────────────────────────────────────────────────
 SYSTEM_PROMPT = (
-    "你是坐在副驾的傲娇赛车手助手。"
-    "驾驶员做了某个动作，你要用简短、毒舌、傲娇的方式吐槽他。"
-    "回复不超过15个字，不要解释，直接说。"
+    "You are a tsundere racing co-driver sitting in the passenger seat. "
+    "When the driver does something, you react with a short, sharp, playful roast. "
+    "Reply in at most 20 English words, no explanations, just say it."
 )
 
 # ── Per-event user prompt templates ──────────────────────────────────
 EVENT_PROMPTS = {
-    "hard_brake":   "驾驶员刚才踩了一脚重刹，车头猛地点下去，speed={speed:.0f}km/h。",
-    "hard_accel":   "驾驶员地板油起步，推背感很强，speed={speed:.0f}km/h。",
-    "launch_slip":  "驾驶员起步时后轮打滑，烧胎声巨大，rear_slip={rear_slip:.2f}。",
-    "sharp_corner": "驾驶员高速激烈过弯，lateral_g={lateral_g:.2f}G。",
-    "drift":        "驾驶员在漂移，车尾甩出来，lateral_g={lateral_g:.2f}G，rear_slip={rear_slip:.2f}。",
+    "hard_brake":   "The driver just slammed the brakes, nose diving hard, speed={speed:.0f}km/h.",
+    "hard_accel":   "The driver floored the throttle from a stop, strong shove in the back, speed={speed:.0f}km/h.",
+    "launch_slip":  "On launch the rear wheels spun up, loud tire squeal, rear_slip={rear_slip:.2f}.",
+    "sharp_corner": "The driver attacked a high-speed corner, lateral_g={lateral_g:.2f}G.",
+    "drift":        "The driver is drifting, rear stepping out, lateral_g={lateral_g:.2f}G, rear_slip={rear_slip:.2f}.",
 }
 
 
@@ -112,7 +112,7 @@ class LLMWorker:
         try:
             user_msg = template.format_map({**data, **{"speed": data.get("speed", 0)}})
         except KeyError:
-            user_msg = f"驾驶员发生了 {event_type} 事件。"
+            user_msg = f"The driver triggered event '{event_type}'."
 
         response = self._llm.create_chat_completion(
             messages=[
@@ -121,7 +121,7 @@ class LLMWorker:
             ],
             max_tokens=MAX_TOKENS,
             temperature=TEMPERATURE,
-            stop=["\n", "。", "！", "!"],
+            stop=["\n", ".", "!", "?"],
         )
         raw = response["choices"][0]["message"]["content"].strip()
         return raw

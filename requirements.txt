@@ -24,3 +24,4 @@ PyQt5>=5.15.0
 # Install CPU-only (Windows / any):
 #   pip install llama-cpp-python
 llama-cpp-python>=0.2.90
+huggingface_hub>=1.0.0   # for downloading GGUF models

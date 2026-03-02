@@ -83,12 +83,22 @@
 ### Sprint 2：灵魂注入 (LLM & TTS) — 进行中
 
 **已完成**：
-- `llm_worker.py`：后台线程封装，queue 防堆积，5 个事件各有 Prompt 模板，傲娇人设
+- `llm_worker.py`：后台线程封装，queue 防堆积，5 个事件各有 Prompt 模板，人设改为英文 tsundere
 - `rule_engine.py` 已接入：`fire()` 触发时自动 `submit` 给 LLM，LLM 不可用时静默降级
-- `test_ui.py`：PyQt5 Overlay MVP，事件触发后屏幕居中显示彩色文字 2.5s
+- `test_ui.py`：PyQt5 Overlay MVP，事件触发后屏幕居中显示彩色文字 2.5s（当前作为调试用 UI）
+- `debug_sub.py`：极简 ZMQ SUB，用来直接打印 `sniffer.py` 发出的原始 JSON 帧做链路排查
+
+**当前已知问题 / 调试记录**：
+- `sniffer.py` 能成功 `bind` 到 `tcp://127.0.0.1:5555`，进 AC 上车后也能从 `sim_info.py` 读到物理量（用 `test_road.py` 验证 OK）。
+- 但在实机测试中，`debug_sub.py` / `test_ui.py` 订阅同一地址时，偶尔会出现“PUB 正常、SUB 却长期收不到帧”的情况。
+- 期间发现两个干扰因素：
+  - 端口占用：老的 `sniffer.py` 进程没有退出，导致新的进程 `ZMQError: Address in use`，需要 `netstat / taskkill` 清理。
+  - 调试脚本自身的延迟：早期版本的 `debug_sub.py` 每次只读 1 帧再 `sleep(0.2)`，会在 SUB 侧堆积大量历史消息，看起来像“延迟 30 秒以上”，后续已改为一次性 drain ZMQ 队列，只保留最后一帧。
+- 当前状态：`sniffer.py` + 新版 `debug_sub.py` 在命令行里可以看到稳定的 60Hz 数据，但 Overlay UI 还没完全恢复接入（临时改成只显示调试文本），且 Sniffer/ZMQ 对 AC 会话的生命周期行为还需要在更多赛道 / 维修区场景下实车复测。
 
 **待完成**：
-- [ ] 下载模型并实车验证：`Qwen2.5-1.5B-Instruct-Q4_K_M.gguf`（~1 GB）
+- [ ] 把 `test_ui.py` 从“纯调试 Banner（直显 telemetry）”恢复为“基于 rule_engine 的事件可视化 + LLM 吐槽”，并在纽北 / 其他赛道做端到端联调。
+- [ ] 下载并实机验证模型：`qwen2.5-1.5b-instruct-q4_k_m.gguf`（~1 GB，已下载到 `models/`，仍需长时间跑车验证稳定性和性能）
 - [ ] 接入 edge-tts：覆写 `LLMWorker.on_response()`，文本 → 语音
 - [ ] 调试蓝牙 / 扬声器音频通道
 - [ ] 跑通完整链路：游戏操作 → Sniffer → Rule → LLM → TTS 播放

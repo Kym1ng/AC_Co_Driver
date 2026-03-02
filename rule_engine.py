@@ -47,7 +47,7 @@ REAR_FRONT_SLIP_DIFF = 0.25  # rear slip must exceed front by this margin
 COOLDOWN_SEC = 3.0
 
 
-def main(model_path: str = "models/Qwen2.5-1.5B-Instruct-Q4_K_M.gguf"):
+def main(model_path: str = "models/qwen2.5-1.5b-instruct-q4_k_m.gguf"):
     # ── optional LLM ─────────────────────────────────────────────────
     llm = None
     if _llm_available:
