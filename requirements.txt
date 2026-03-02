@@ -6,12 +6,21 @@ httpx>=0.27.0
 # TTS (Sprint 2)
 edge-tts>=6.1.0
 
+# Rule engine: ZMQ pub/sub (no GIL-bound I/O)
+pyzmq>=26.0.0
+
 # Config
 python-dotenv>=1.0.0
 
-# Packing & UI (Sprint 3, optional)
-# pyinstaller>=6.0.0
-# PyQt5>=5.15
+# UI overlay
+PyQt5>=5.15.0
 
-# Optional: self-hosted GGUF (if not using Ollama)
-# llama-cpp-python>=0.2.0
+# Packing (Sprint 3, optional)
+# pyinstaller>=6.0.0
+
+# GGUF local inference (Sprint 2)
+# Install with Metal GPU on Apple Silicon:
+#   CMAKE_ARGS="-DLLAMA_METAL=on" pip install llama-cpp-python
+# Install CPU-only (Windows / any):
+#   pip install llama-cpp-python
+llama-cpp-python>=0.2.90

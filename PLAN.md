@@ -2,7 +2,7 @@
 
 ## 产品基调
 
-**低门槛、解压即用**：面向 Assetto Corsa 玩家的桌面端“外挂式”驾驶伴侣，无需在游戏内装任何现代 Python 环境。
+**低门槛、解压即用**：面向 Assetto Corsa 玩家的桌面端"外挂式"驾驶伴侣，无需在游戏内装任何现代 Python 环境。
 
 **技术现实**：AC 内置 Python 为 3.3，无法安装现代 LLM/TTS 库 → 采用**外挂式独立程序**架构，在 Windows 上单独运行，通过共享内存读取游戏遥测。
 
@@ -17,105 +17,121 @@
                                  │ mmap @ 60Hz
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  数据采集 (The Sniffer)                                                  │
-│  Python 后台读取 AC Shared Memory：车速、G 力、踏板深度、轮胎打滑率等      │
+│  sniffer.py  [✅ 完成]                                                   │
+│  ZMQ PUB @ tcp://127.0.0.1:5555，60Hz 广播 JSON payload                 │
+│  字段：speed, long_g, lateral_g, gas, brake, gear, rpms,               │
+│        wheel_slip[4], wheel_load[4], suspension_travel[4],             │
+│        abs_active, tc_active, steer_angle, pitch, roll                 │
 └───────────────────────────────┬─────────────────────────────────────────┘
-                                 │
+                                 │ JSON @ 60Hz (ZMQ PUB/SUB)
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  规则引擎 (Rule-based Trigger)                                           │
-│  阈值逻辑，无 1D-CNN。例：rear_wheel_slip > θ 且 lateral_G > 1.2 → 漂移  │
+│  rule_engine.py  [✅ 完成]                                               │
+│  ZMQ SUB，deque(maxlen=60) 滑动窗口，10Hz 规则扫描                       │
+│  Events：hard_brake / hard_accel / launch_slip /                        │
+│           sharp_corner / drift                                          │
+│  触发后：① print Event  ② submit 到 LLMWorker（可选）                   │
 └───────────────────────────────┬─────────────────────────────────────────┘
-                                 │ Event
+                                 │ event_type + context dict
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  认知层 (Embedded LLM)                                                   │
-│  llama-cpp-python + 1.5B GGUF，结合 Context 生成吐槽                      │
+│  llm_worker.py  [✅ 框架完成，待实车验证]                                 │
+│  llama-cpp-python + Qwen2.5-1.5B-Instruct-Q4_K_M.gguf                  │
+│  后台线程 + queue(maxsize=3) 防堆积，傲娇人设 Prompt                     │
+│  on_response() 可覆写 → 默认 print，后续接 TTS                          │
 └───────────────────────────────┬─────────────────────────────────────────┘
-                                 │ 文本
+                                 │ 生成文本
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  语音合成 (TTS)                                                          │
-│  Edge TTS（微软在线）或 Windows SAPI5 本地                               │
+│  TTS  [⏳ 待开发]                                                        │
+│  edge-tts（微软在线）或 Windows SAPI5 本地                               │
+│  覆写 LLMWorker.on_response() 接入即可                                   │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                  │ 音频
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  表现层 (Overlay UI)                                                     │
-│  PyQt5 / Tkinter：置顶、无边框、透明小窗，像素表情 + 字幕                 │
+│  test_ui.py / Overlay  [✅ MVP 完成，待像素表情细化]                      │
+│  PyQt5 置顶透明窗口，FramelessWindowHint + WA_TranslucentBackground      │
+│  RuleWorker(QThread) 内嵌规则逻辑，event_fired signal → 显示文字 2.5s   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-| 模块 | 技术选型 | 说明 |
-|------|----------|------|
-| 数据采集 | Windows mmap + AC Shared Memory | 60Hz 精准物理数据，依赖 `sim_info.py` 等官方结构体 |
-| 规则引擎 | 纯阈值逻辑 | 如重刹、漂移、猛加速等，按 G 力、打滑率等判条件 |
-| 认知层 | llama-cpp-python + GGUF (e.g. Qwen-1.5B-Chat-Q4_K_M) | 本地推理，结合当前 Context 生成短句 |
-| TTS | edge-tts 或 SAPI5 | 优先 Edge TTS 免打包大模型；备选本地 SAPI5 |
-| 表现层 | PyQt5 或 Tkinter | 置顶透明窗口，像素表情 + 字幕 |
+| 模块 | 文件 | 状态 | 技术选型 |
+|------|------|------|----------|
+| 数据契约 | `payload.py` | ✅ | `build_payload()` 定义全量字段，两侧共用 |
+| 数据采集 | `sniffer.py` | ✅ | mmap + ctypes，60Hz ZMQ PUB |
+| 规则引擎 | `rule_engine.py` | ✅ | 阈值规则 + deque 窗口 + 冷却机制 |
+| LLM 推理 | `llm_worker.py` | ✅ 框架 / ⏳ 待验证 | llama-cpp-python + GGUF，后台队列 |
+| TTS | — | ⏳ 待开发 | edge-tts / SAPI5，覆写 on_response() |
+| Overlay UI | `test_ui.py` | ✅ MVP | PyQt5 无边框透明置顶，QThread 驱动 |
 
 ---
 
 ## 2. 里程碑计划 (Milestones)
 
-### Sprint 1：物理外挂与规则引擎 (The "Blind" Companion)
+### Sprint 1：物理外挂与规则引擎 ✅
 
-**目标**：独立 Python 程序能读取 AC 遥测，并在终端里精准打印当前驾驶行为（如“你刚踩了重刹”“你在漂移”）。
-
-**任务**：
-- 搞定 `sim_info.py`（AC 官方共享内存结构体），在 Windows 下用 mmap 读取
-- 编写基于阈值的 Trigger 逻辑（重刹、猛加速、漂移、激烈过弯等）
-- 终端输出可验证的 Event 流
-
-**交付物**：无 UI、无语音，仅“能看懂的终端伴侣”。
+**交付物已完成**：
+- `sim_info.py`：AC 共享内存翻译官（mmap + ctypes 结构体）
+- `payload.py`：数据契约，含 15 个物理字段（per-wheel slip/load/suspension 等）
+- `sniffer.py`：60Hz 遥测采集，ZMQ PUB
+- `rule_engine.py`：5 类事件规则引擎（ZMQ SUB + 滑动窗口 + 冷却）
+- `test_road.py`：终端实时仪表盘，连通性验证工具
 
 ---
 
-### Sprint 2：灵魂注入 (LLM & TTS Integration)
+### Sprint 2：灵魂注入 (LLM & TTS) — 进行中
 
-**目标**：让脚本“开口说话”。
+**已完成**：
+- `llm_worker.py`：后台线程封装，queue 防堆积，5 个事件各有 Prompt 模板，傲娇人设
+- `rule_engine.py` 已接入：`fire()` 触发时自动 `submit` 给 LLM，LLM 不可用时静默降级
+- `test_ui.py`：PyQt5 Overlay MVP，事件触发后屏幕居中显示彩色文字 2.5s
 
-**任务**：
-- 下载轻量 GGUF 模型（如 Qwen-1.5B-Chat-Q4_K_M.gguf）
-- 编写 llama-cpp-python 推理代码，接收 Trigger 的 Context，生成吐槽短句
-- 接入 edge-tts（或 SAPI5），将 LLM 输出转为语音播放
-- 测试完整链路：游戏内操作 → Python 捕获 → LLM 生成 → TTS 播放（如“推背感太爽啦！”）
-
-**交付物**：能听、能说的语音伴侣（可暂无 Overlay UI）。
-
----
-
-### Sprint 3：包装与分发 (Productization)
-
-**目标**：小白玩家一键安装、解压即用。
-
-**任务**：
-- 用 PyInstaller 将 Python 脚本、依赖、TTS 环境打包成单一 .exe（或可分发的目录）
-- 实现透明置顶 Overlay 窗口，显示像素表情与字幕
-- 整理符合 Content Manager 安装规范的文件夹结构，便于玩家放置与配置
-
-**交付物**：可分发、带 Overlay 的成品形态。
+**待完成**：
+- [ ] 下载模型并实车验证：`Qwen2.5-1.5B-Instruct-Q4_K_M.gguf`（~1 GB）
+- [ ] 接入 edge-tts：覆写 `LLMWorker.on_response()`，文本 → 语音
+- [ ] 调试蓝牙 / 扬声器音频通道
+- [ ] 跑通完整链路：游戏操作 → Sniffer → Rule → LLM → TTS 播放
 
 ---
 
-## 3. 文档与代码结构（规划）
+### Sprint 3：包装与分发 (Productization) — 待开始
+
+**目标**：小白玩家解压即用。
+
+- [ ] PyInstaller 打包：所有脚本 + 依赖 + GGUF 路径 → 单 .exe 或目录
+- [ ] Overlay 像素表情细化（替换现在的文字为像素艺术动画）
+- [ ] 整理 Content Manager 兼容的文件夹结构 + 用户说明文档
+
+---
+
+## 3. 当前文件结构（实际）
 
 ```
 co_driver/
-├── PLAN.md                 # 本文件：总体计划
-├── docs/                   # 设计 / 共享内存结构说明（可选）
-├── src/                    # 主程序
-│   ├── sniffer/            # Shared Memory 读取 (sim_info 等)
-│   ├── rules/              # 规则引擎与 Trigger 逻辑
-│   ├── llm/                # llama-cpp-python 推理
-│   ├── tts/                # Edge TTS / SAPI5
-│   └── overlay/            # PyQt5/Tkinter 置顶窗口
-├── assets/                 # 像素表情、配置等
-├── models/                 # GGUF 模型放置（或下载说明）
-├── dist/                   # PyInstaller 输出
-└── requirements.txt
+├── PLAN.md                 # 本文件
+├── README.md               # 项目简介
+├── requirements.txt        # 依赖（ollama, zmq, llama-cpp-python, PyQt5, edge-tts…）
+├── sim_info.py             # AC 共享内存结构体（官方翻译官）
+├── payload.py              # 数据契约：build_payload() 定义 JSON 帧格式
+├── sniffer.py              # Node A：60Hz 采集 → ZMQ PUB
+├── rule_engine.py          # Node B：ZMQ SUB → 规则 → Event → LLM submit
+├── llm_worker.py           # LLM 推理模块（llama-cpp-python + GGUF）
+├── test_road.py            # 终端仪表盘（连通性测试）
+├── test_ui.py              # PyQt5 Overlay MVP（事件触发 → 屏幕显示）
+├── models/                 # GGUF 模型存放处（.gitignore 大文件）
+└── venv/                   # 虚拟环境（.gitignore）
 ```
 
 ---
 
-*最后更新：按 Assetto Corsa 外挂式架构与三阶段里程碑整理。*
+## 4. 下一步（最近优先）
+
+1. `pip install llama-cpp-python` 并下载 GGUF 模型到 `models/`
+2. 跑 `python llm_worker.py` 离线验证 5 种事件的吐槽输出
+3. 覆写 `LLMWorker.on_response()` 接入 edge-tts，实现文字 → 语音
+4. 同时开 sniffer + rule_engine + test_ui，完整实车联调
+
+---
+
+*最后更新：Sprint 1 全部完成；Sprint 2 LLM 框架完成，TTS 待接入；Overlay MVP 就绪。*
