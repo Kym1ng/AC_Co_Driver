@@ -37,7 +37,7 @@
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  llm_worker.py  [✅ 框架完成，待实车验证]                                 │
 │  llama-cpp-python + Qwen2.5-1.5B-Instruct-Q4_K_M.gguf                  │
-│  后台线程 + queue(maxsize=3) 防堆积，傲娇人设 Prompt                     │
+│  后台线程 + queue(maxsize=3) 防堆积，tsundere 人设 Prompt（英文）        │
 │  on_response() 可覆写 → 默认 print，后续接 TTS                          │
 └───────────────────────────────┬─────────────────────────────────────────┘
                                  │ 生成文本
@@ -50,7 +50,7 @@
                                  │ 音频
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  test_ui.py / Overlay  [✅ MVP 完成，待像素表情细化]                      │
+│  test_ui.py / Overlay  [✅ MVP 完成，待恢复规则+LLM联动]                  │
 │  PyQt5 置顶透明窗口，FramelessWindowHint + WA_TranslucentBackground      │
 │  RuleWorker(QThread) 内嵌规则逻辑，event_fired signal → 显示文字 2.5s   │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -61,7 +61,7 @@
 | 数据契约 | `payload.py` | ✅ | `build_payload()` 定义全量字段，两侧共用 |
 | 数据采集 | `sniffer.py` | ✅ | mmap + ctypes，60Hz ZMQ PUB |
 | 规则引擎 | `rule_engine.py` | ✅ | 阈值规则 + deque 窗口 + 冷却机制 |
-| LLM 推理 | `llm_worker.py` | ✅ 框架 / ⏳ 待验证 | llama-cpp-python + GGUF，后台队列 |
+| LLM 推理 | `llm_worker.py` | ✅ 框架 / ⏳ 待实车验证 | llama-cpp-python + GGUF，后台队列 |
 | TTS | — | ⏳ 待开发 | edge-tts / SAPI5，覆写 on_response() |
 | Overlay UI | `test_ui.py` | ✅ MVP | PyQt5 无边框透明置顶，QThread 驱动 |
 
@@ -85,23 +85,34 @@
 **已完成**：
 - `llm_worker.py`：后台线程封装，queue 防堆积，5 个事件各有 Prompt 模板，人设改为英文 tsundere
 - `rule_engine.py` 已接入：`fire()` 触发时自动 `submit` 给 LLM，LLM 不可用时静默降级
-- `test_ui.py`：PyQt5 Overlay MVP，事件触发后屏幕居中显示彩色文字 2.5s（当前作为调试用 UI）
-- `debug_sub.py`：极简 ZMQ SUB，用来直接打印 `sniffer.py` 发出的原始 JSON 帧做链路排查
+- `test_ui.py`：PyQt5 Overlay MVP，窗口弹出、Banner 显示均验证通过
+- `debug_sub.py`：极简 ZMQ SUB 调试工具，直接打印 sniffer 原始帧
+- `run_co_driver.bat`：一键启动两个进程（sniffer + debug_sub / test_ui）
 
-**当前已知问题 / 调试记录**：
-- `sniffer.py` 能成功 `bind` 到 `tcp://127.0.0.1:5555`，进 AC 上车后也能从 `sim_info.py` 读到物理量（用 `test_road.py` 验证 OK）。
-- 但在实机测试中，`debug_sub.py` / `test_ui.py` 订阅同一地址时，偶尔会出现“PUB 正常、SUB 却长期收不到帧”的情况。
-- 期间发现两个干扰因素：
-  - 端口占用：老的 `sniffer.py` 进程没有退出，导致新的进程 `ZMQError: Address in use`，需要 `netstat / taskkill` 清理。
-  - 调试脚本自身的延迟：早期版本的 `debug_sub.py` 每次只读 1 帧再 `sleep(0.2)`，会在 SUB 侧堆积大量历史消息，看起来像“延迟 30 秒以上”，后续已改为一次性 drain ZMQ 队列，只保留最后一帧。
-- 当前状态：`sniffer.py` + 新版 `debug_sub.py` 在命令行里可以看到稳定的 60Hz 数据，但 Overlay UI 还没完全恢复接入（临时改成只显示调试文本），且 Sniffer/ZMQ 对 AC 会话的生命周期行为还需要在更多赛道 / 维修区场景下实车复测。
+**调试记录（已全部解决）**：
+
+1. **端口占用 (`ZMQError: Address in use`)**
+   - 老 `sniffer.py` 进程未退出时新进程无法 `bind`，需要 `netstat -ano | findstr 5555` + `taskkill /PID xxx /F` 清理。
+   - ✅ 已修复：`bind` 后立即加 `sock.setsockopt(zmq.LINGER, 0)`，Ctrl+C 后端口立刻释放，不再拖泥带水。
+
+2. **SUB 端 drain 循环阻塞导致幽灵延迟 30s+**
+   - 根本原因：`recv_string()`（无 flag）配合 `RCVTIMEO=500ms`，每次队列排空时会死等 500ms 才抛 `zmq.Again`，60Hz 数据流在底层缓冲区疯狂堆积，表现为"SUB 长期收不到帧"或"UI 严重卡顿"。
+   - ✅ 已修复：改为 `recv_string(flags=zmq.NOBLOCK)`，队列空时立刻跳出。三个文件均已修改：`debug_sub.py`、`rule_engine.py`、`test_ui.py`。
+
+3. **AC 关闭后共享内存残留假数据**
+   - AC 退出后 Windows 命名共享内存不清零，`sniffer.py` 可以连上并持续广播上次游戏最后一帧（如 speed=12.4 km/h），让 `debug_sub` 误以为游戏在运行。
+   - ✅ 已修复：`sniffer.py` 的发布循环加 `if info.graphics.status != 2: continue`，只有 AC 处于 `AC_LIVE` 状态才发布帧，其余状态静默空转。
+
+**当前状态（链路已通）**：
+- `sniffer.py` → ZMQ PUB → `debug_sub.py` 全链路验证通过，数据实时、无延迟、无假帧。
+- `test_ui.py` Overlay 窗口弹出正常，Banner 可见，当前处于"显示原始 telemetry 调试模式"，规则引擎 + LLM 联动待恢复。
 
 **待完成**：
-- [ ] 把 `test_ui.py` 从“纯调试 Banner（直显 telemetry）”恢复为“基于 rule_engine 的事件可视化 + LLM 吐槽”，并在纽北 / 其他赛道做端到端联调。
-- [ ] 下载并实机验证模型：`qwen2.5-1.5b-instruct-q4_k_m.gguf`（~1 GB，已下载到 `models/`，仍需长时间跑车验证稳定性和性能）
-- [ ] 接入 edge-tts：覆写 `LLMWorker.on_response()`，文本 → 语音
-- [ ] 调试蓝牙 / 扬声器音频通道
-- [ ] 跑通完整链路：游戏操作 → Sniffer → Rule → LLM → TTS 播放
+- [ ] 把 `test_ui.py` 从"纯调试 Banner"恢复为"规则引擎事件可视化 + LLM 吐槽"，端到端联调。
+- [ ] 实机验证 LLM：`qwen2.5-1.5b-instruct-q4_k_m.gguf`（已下载到 `models/`），验证响应延迟与吐槽质量。
+- [ ] 接入 edge-tts：覆写 `LLMWorker.on_response()`，文本 → 语音。
+- [ ] 调试蓝牙 / 扬声器音频通道。
+- [ ] 跑通完整链路：游戏操作 → Sniffer → Rule → LLM → TTS 播放。
 
 ---
 
@@ -121,27 +132,28 @@
 co_driver/
 ├── PLAN.md                 # 本文件
 ├── README.md               # 项目简介
-├── requirements.txt        # 依赖（ollama, zmq, llama-cpp-python, PyQt5, edge-tts…）
+├── requirements.txt        # 依赖（zmq, llama-cpp-python, PyQt5, edge-tts…）
+├── run_co_driver.bat       # 一键启动脚本（sniffer + test_ui / debug_sub）
 ├── sim_info.py             # AC 共享内存结构体（官方翻译官）
 ├── payload.py              # 数据契约：build_payload() 定义 JSON 帧格式
-├── sniffer.py              # Node A：60Hz 采集 → ZMQ PUB
+├── sniffer.py              # Node A：60Hz 采集 → ZMQ PUB（仅 AC_LIVE 时发布）
 ├── rule_engine.py          # Node B：ZMQ SUB → 规则 → Event → LLM submit
 ├── llm_worker.py           # LLM 推理模块（llama-cpp-python + GGUF）
 ├── test_road.py            # 终端仪表盘（连通性测试）
-├── test_ui.py              # PyQt5 Overlay MVP（事件触发 → 屏幕显示）
+├── test_ui.py              # PyQt5 Overlay MVP（当前为调试 Banner 模式）
+├── debug_sub.py            # 极简 ZMQ SUB 调试工具
 ├── models/                 # GGUF 模型存放处（.gitignore 大文件）
-└── venv/                   # 虚拟环境（.gitignore）
+└── .venv/                  # 虚拟环境（.gitignore）
 ```
 
 ---
 
 ## 4. 下一步（最近优先）
 
-1. `pip install llama-cpp-python` 并下载 GGUF 模型到 `models/`
-2. 跑 `python llm_worker.py` 离线验证 5 种事件的吐槽输出
-3. 覆写 `LLMWorker.on_response()` 接入 edge-tts，实现文字 → 语音
-4. 同时开 sniffer + rule_engine + test_ui，完整实车联调
+1. 恢复 `test_ui.py` 的规则引擎 + LLM 联动，在 AC 上实车跑通完整链路
+2. 覆写 `LLMWorker.on_response()` 接入 edge-tts，实现文字 → 语音
+3. 全链路联调：游戏操作 → Sniffer → Rule → LLM → TTS 播放
 
 ---
 
-*最后更新：Sprint 1 全部完成；Sprint 2 LLM 框架完成，TTS 待接入；Overlay MVP 就绪。*
+*最后更新：Sprint 1 全部完成；Sprint 2 ZMQ 链路调试完毕（三个 bug 已修复），Overlay MVP 就绪，LLM 实车验证与 TTS 接入为下一步。*

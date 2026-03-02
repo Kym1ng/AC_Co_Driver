@@ -76,7 +76,7 @@ def main(model_path: str = "models/qwen2.5-1.5b-instruct-q4_k_m.gguf"):
             # Drain all available frames (non-blocking style with timeout)
             try:
                 while True:
-                    msg = sock.recv_string()
+                    msg = sock.recv_string(flags=zmq.NOBLOCK)
                     frame = json.loads(msg)
                     window.append(frame)
             except zmq.Again:

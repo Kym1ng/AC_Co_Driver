@@ -129,7 +129,7 @@ class RuleWorker(QThread):
             # drain ZMQ buffer
             try:
                 while True:
-                    raw = sock.recv_string()
+                    raw = sock.recv_string(flags=zmq.NOBLOCK)
                     frame = json.loads(raw)
                     window.append(frame)
                     rx_frames += 1

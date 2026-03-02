@@ -37,7 +37,7 @@ def main() -> None:
             # Drain all queued messages so we always show the *freshest* frame.
             while True:
                 try:
-                    raw = sock.recv_string()
+                    raw = sock.recv_string(flags=zmq.NOBLOCK)
                 except zmq.Again:
                     break
                 else:

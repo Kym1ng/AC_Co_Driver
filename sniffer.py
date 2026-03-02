@@ -27,6 +27,7 @@ def main():
     ctx = zmq.Context()
     sock = ctx.socket(zmq.PUB)
     sock.bind(PUB_BIND)
+    sock.setsockopt(zmq.LINGER, 0)  # release port immediately on Ctrl+C
     print(f"Sniffer PUB bound to {PUB_BIND} @ {HZ} Hz. Ctrl+C to stop.")
 
     try:
@@ -55,6 +56,14 @@ def main():
             steer_angle = p.steerAngle
             pitch       = p.pitch
             roll        = p.roll
+
+            # Only publish when AC is in a live session (status == AC_LIVE = 2).
+            # Shared memory persists after AC closes, so without this check we'd
+            # broadcast stale data from the last session.
+            ac_status = info.graphics.status
+            if ac_status != 2:
+                time.sleep(1 / HZ)
+                continue
 
             payload = build_payload(
                 speed=speed,
